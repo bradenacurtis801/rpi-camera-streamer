@@ -4,7 +4,7 @@ import asyncio
 from pathlib import Path
 from threading import Condition, Thread
 from fastapi import FastAPI, WebSocket
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from picamera2 import Picamera2
 from picamera2.encoders import MJPEGEncoder, Quality
 from picamera2.outputs import FileOutput
@@ -45,6 +45,7 @@ class JpegStream:
         self.connections = set()
         self.picam2 = None
         self.loop = loop  # Main event loop
+        self.output = StreamingOutput()
         self._initialized = True
 
     async def send_frame(self, jpeg_data):
@@ -62,17 +63,20 @@ class JpegStream:
             main={"size": (1920, 1080)}
         )
         self.picam2.configure(video_config)
-        output = StreamingOutput()
-        self.picam2.start_recording(MJPEGEncoder(), FileOutput(output), Quality.MEDIUM)
+        self.picam2.start_recording(MJPEGEncoder(), FileOutput(self.output), Quality.MEDIUM)
 
         try:
             while self.active:
-                jpeg_data = output.read()
+                jpeg_data = self.output.read()
                 asyncio.run_coroutine_threadsafe(self.send_frame(jpeg_data), self.loop)
         finally:
             self.picam2.stop_recording()
             self.picam2.close()
             self.picam2 = None
+
+    def get_frame(self):
+        """Retrieve the latest frame for HTTP MJPEG streaming."""
+        return self.output.read()
 
     def start(self):
         """Start the JPEG stream in a new thread."""
@@ -101,6 +105,18 @@ async def index():
     """Serve the main HTML page."""
     index_file = Path(__file__).parent / "index.html"
     return HTMLResponse(index_file.read_text())
+
+# MJPEG Streaming Route
+@app.get("/mjpeg")
+async def mjpeg_stream():
+    """Serve the MJPEG stream via HTTP."""
+    def generate():
+        while True:
+            frame = jpeg_stream.get_frame()
+            yield (b'--frame\r\n'
+                   b'Content-Type: image/jpeg\r\n\r\n' + frame + b'\r\n')
+    
+    return StreamingResponse(generate(), media_type="multipart/x-mixed-replace; boundary=frame")
 
 
 @app.websocket("/ws")
