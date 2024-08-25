@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Camera Stream</title>
+    <style>
+        .container {
+            max-width: 800px;
+            margin: 0 auto;
+            text-align: center;
+        }
+        .video-container {
+            background-color: #f0f0f0;
+            position: relative;
+            padding-bottom: 56.25%; /* 16:9 Aspect Ratio */
+            height: 0;
+        }
+        .video-container img {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: contain;
+        }
+        .status {
+            margin-top: 10px;
+            font-size: 14px;
+            color: gray;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>JPEG Stream</h1>
+        <div class="video-container">
+            <img id="stream" alt="JPEG Stream" />
+        </div>
+        <button id="toggleStream">Start Stream</button>
+        <div class="status" id="status">Status: Disconnected</div>
+    </div>
+
+    <script>
+        const imgElement = document.getElementById('stream');
+        const toggleButton = document.getElementById('toggleStream');
+        const statusElement = document.getElementById('status');
+        let isStreaming = false;
+        let websocket = null;
+
+        function startStream() {
+            fetch('http://10.10.1.7:8000/start', { method: 'POST' });
+            websocket = new WebSocket('ws://10.10.1.7:8000/ws');
+            websocket.binaryType = 'blob';
+
+            websocket.onopen = () => {
+                statusElement.textContent = 'Status: Connected';
+            };
+
+            websocket.onmessage = (event) => {
+                if (imgElement.src) {
+                    URL.revokeObjectURL(imgElement.src);
+                }
+                const url = URL.createObjectURL(event.data);
+                imgElement.src = url;
+            };
+
+            websocket.onclose = () => {
+                statusElement.textContent = 'Status: Disconnected';
+            };
+
+            websocket.onerror = () => {
+                statusElement.textContent = 'Status: Error';
+            };
+        }
+
+        function stopStream() {
+            fetch('http://10.10.1.7:8000/stop', { method: 'POST' });
+            if (websocket) {
+                websocket.close();
+                websocket = null;
+            }
+            imgElement.src = '';
+            statusElement.textContent = 'Status: Disconnected';
+        }
+
+        toggleButton.addEventListener('click', () => {
+            if (isStreaming) {
+                stopStream();
+                toggleButton.textContent = 'Start Stream';
+            } else {
+                startStream();
+                toggleButton.textContent = 'Stop Stream';
+            }
+            isStreaming = !isStreaming;
+        });
+    </script>
+</body>
+</html>
